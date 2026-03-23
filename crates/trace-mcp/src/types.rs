@@ -76,12 +76,12 @@ pub struct GetMemoryHistoryRequest {
     #[schemars(description = "Starting index in history records (for pagination, default: 0)")]
     #[serde(default)]
     pub offset: usize,
-    #[schemars(description = "Max records to return (default: 50, max: 200)")]
+    #[schemars(description = "Max records to return (default: 30, max: 200)")]
     #[serde(default = "default_history_limit")]
     pub limit: usize,
 }
 
-fn default_history_limit() -> usize { 50 }
+fn default_history_limit() -> usize { 30 }
 
 // ── 搜索与分析 ──
 
@@ -97,7 +97,7 @@ pub struct SearchInstructionsRequest {
     #[schemars(description = "Case-sensitive matching")]
     #[serde(default)]
     pub case_sensitive: bool,
-    #[schemars(description = "Max results to return (default: 200)")]
+    #[schemars(description = "Max results to return (default: 30, max: 200)")]
     pub max_results: Option<u32>,
 }
 
@@ -126,12 +126,12 @@ pub struct GetTaintedLinesRequest {
     #[schemars(description = "Pagination offset (default: 0)")]
     #[serde(default)]
     pub offset: u32,
-    #[schemars(description = "Max lines to return (default: 100, max: 500)")]
+    #[schemars(description = "Max lines to return (default: 50, max: 200)")]
     #[serde(default = "default_taint_limit")]
     pub limit: u32,
 }
 
-fn default_taint_limit() -> u32 { 100 }
+fn default_taint_limit() -> u32 { 50 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ClearTaintRequest {
@@ -200,13 +200,13 @@ pub struct GetStringsRequest {
     #[schemars(description = "Pagination offset (default: 0)")]
     #[serde(default)]
     pub offset: u32,
-    #[schemars(description = "Max strings to return (default: 100, max: 500)")]
+    #[schemars(description = "Max strings to return (default: 50, max: 200)")]
     #[serde(default = "default_strings_limit")]
     pub limit: u32,
 }
 
 fn default_min_str_len() -> u32 { 4 }
-fn default_strings_limit() -> u32 { 100 }
+fn default_strings_limit() -> u32 { 50 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetStringXRefsRequest {

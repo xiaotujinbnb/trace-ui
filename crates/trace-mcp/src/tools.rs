@@ -21,6 +21,7 @@ const MAX_SEARCH: u32 = 200;
 const MAX_HISTORY: usize = 200;
 // Referenced in: get_dependency_tree, build_dep_tree_from_slice descriptions ("up to 200 nodes")
 const MAX_DEP_NODES: u32 = 200;
+const DEFAULT_SEARCH: u32 = 30;
 
 fn json(val: &impl serde::Serialize) -> String {
     serde_json::to_string_pretty(val).unwrap_or_else(|e| format!("{{\"error\": \"serialization failed: {}\"}}", e))
@@ -213,7 +214,7 @@ impl TraceToolHandler {
     async fn search_instructions(&self, Parameters(req): Parameters<SearchInstructionsRequest>) -> Result<String, String> {
         let engine = self.engine.clone();
         blocking(move || {
-            let max = req.max_results.unwrap_or(MAX_SEARCH).min(MAX_SEARCH);
+            let max = req.max_results.unwrap_or(DEFAULT_SEARCH).min(MAX_SEARCH);
             let options = SearchOptions {
                 case_sensitive: req.case_sensitive,
                 use_regex: req.use_regex,
@@ -281,7 +282,7 @@ impl TraceToolHandler {
             Supports pagination with offset/limit."
     )]
     fn get_tainted_lines(&self, Parameters(req): Parameters<GetTaintedLinesRequest>) -> Result<String, String> {
-        let limit = req.limit.min(500);
+        let limit = req.limit.min(200);
 
         let all_seqs = self.engine.get_tainted_seqs(&req.session_id)
             .map_err(|e| e.to_string())?;
@@ -399,7 +400,7 @@ impl TraceToolHandler {
             Each string includes its memory address, content, encoding, and access type."
     )]
     fn get_strings(&self, Parameters(req): Parameters<GetStringsRequest>) -> Result<String, String> {
-        let limit = req.limit.min(500);
+        let limit = req.limit.min(200);
         let options = StringQueryOptions {
             min_len: req.min_len,
             offset: req.offset,
