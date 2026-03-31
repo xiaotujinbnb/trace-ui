@@ -4,7 +4,7 @@ import type { ResolvedRow } from "../hooks/useFoldState";
 import DisasmHighlight from "./DisasmHighlight";
 import Minimap, { MINIMAP_WIDTH } from "./Minimap";
 import { useSelectedSeq } from "../stores/selectedSeqStore";
-import CustomScrollbar from "./CustomScrollbar";
+import VirtualScrollArea from "./VirtualScrollArea";
 import { useResizableColumn } from "../hooks/useResizableColumn";
 import { highlightText, highlightHexdump } from "../utils/highlightText";
 import VirtualizedHighlight from "./VirtualizedHighlight";
@@ -20,6 +20,7 @@ const DETAIL_INDENT = 40 + 30 + 90 + 90;
 const DETAIL_LEFT_PADDING = 8 + DETAIL_INDENT;
 const DETAIL_MAX_LINES = 16; // hexdump 16 行 = 256 字节
 const OVERSCAN = 12;
+const DETAIL_PREFETCH = 50; // 预取详情的额外缓冲行数
 const WHEEL_SPEED = 3;
 
 /** 检测 hidden_content 是否含有 hexdump 数据行 */
@@ -229,21 +230,26 @@ export default function SearchResultList({
     }
   }, [virtualItems, showSoName, showAbsAddress, addrWidthEstimated, getSeqAtIndex, getMatchDetail, pageVersion]);
 
-  // ── 分页加载 + 详情加载触发 ──
-  const visibleRange = useMemo(() => `${startIdx}-${endIdx}`, [startIdx, endIdx]);
+  // ── 分页加载 + 详情加载触发（含预取缓冲） ──
+  const prefetchRange = useMemo(
+    () => `${Math.max(0, startIdx - DETAIL_PREFETCH)}-${Math.min(totalCount - 1, endIdx + DETAIL_PREFETCH)}`,
+    [startIdx, endIdx, totalCount],
+  );
 
   useEffect(() => {
     if (totalCount === 0) return;
-    ensureRange?.(startIdx, endIdx);
+    const pfStart = Math.max(0, startIdx - DETAIL_PREFETCH);
+    const pfEnd = Math.min(totalCount - 1, endIdx + DETAIL_PREFETCH);
+    ensureRange?.(pfStart, pfEnd);
     if (requestDetails) {
-      const visibleSeqs: number[] = [];
-      for (let i = startIdx; i <= endIdx; i++) {
+      const seqs: number[] = [];
+      for (let i = pfStart; i <= pfEnd; i++) {
         const s = getSeqAtIndex(i);
-        if (s !== undefined) visibleSeqs.push(s);
+        if (s !== undefined) seqs.push(s);
       }
-      if (visibleSeqs.length > 0) requestDetails(visibleSeqs);
+      if (seqs.length > 0) requestDetails(seqs);
     }
-  }, [visibleRange, totalCount, requestDetails, pageVersion]);
+  }, [prefetchRange, totalCount, requestDetails, pageVersion]);
 
   return (
     <>
@@ -272,18 +278,32 @@ export default function SearchResultList({
         <span style={{ width: MINIMAP_WIDTH + 12, flexShrink: 0 }}></span>
       </div>
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        <div
-          ref={parentRef}
-          tabIndex={0}
-          onKeyDown={handleKeyDown}
-          style={{
-            flex: 1,
-            ...vsContainerStyle,
-            outline: "none",
-            fontSize: "var(--font-size-sm)",
-          }}
-        >
+      <VirtualScrollArea
+        containerRef={parentRef}
+        containerStyle={vsContainerStyle}
+        containerHeight={containerHeight}
+        scrollbarProps={vs.scrollbarProps}
+        style={{ outline: "none", fontSize: "var(--font-size-sm)" }}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        gutterWidth={MINIMAP_WIDTH + 12}
+        gutterContent={
+          <Minimap
+            virtualTotalRows={totalCount}
+            visibleRows={visibleRows}
+            currentRow={clampedRow}
+            maxRow={maxRow}
+            height={containerHeight}
+            onScroll={handleScrollbarScroll}
+            resolveVirtualIndex={searchResolve}
+            getLines={searchGetLines}
+            selectedSeq={selectedSeq}
+            rightOffset={12}
+            showSoName={showSoName}
+            showAbsAddress={showAbsAddress}
+          />
+        }
+      >
           {virtualItems.map((vRow) => {
             const seq = getSeqAtIndex(vRow.index);
             const match = seq !== undefined ? getMatchDetail(seq) : undefined;
@@ -432,34 +452,7 @@ export default function SearchResultList({
               </div>
             );
           })}
-        </div>
-        {containerHeight > 0 && (
-          <div style={{ width: MINIMAP_WIDTH + 12, flexShrink: 0, position: "relative" }}>
-            <Minimap
-              virtualTotalRows={totalCount}
-              visibleRows={visibleRows}
-              currentRow={clampedRow}
-              maxRow={maxRow}
-              height={containerHeight}
-              onScroll={handleScrollbarScroll}
-              resolveVirtualIndex={searchResolve}
-              getLines={searchGetLines}
-              selectedSeq={selectedSeq}
-              rightOffset={12}
-              showSoName={showSoName}
-              showAbsAddress={showAbsAddress}
-            />
-            <CustomScrollbar
-              currentRow={clampedRow}
-              maxRow={maxRow}
-              visibleRows={visibleRows}
-              virtualTotalRows={totalCount}
-              trackHeight={containerHeight}
-              onScroll={handleScrollbarScroll}
-            />
-          </div>
-        )}
-      </div>
+      </VirtualScrollArea>
     </>
   );
 }
