@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useVirtualScroll } from "../hooks/useVirtualScroll";
+import { useSelectedSeq } from "../stores/selectedSeqStore";
 import type { CallTreeNodeDto } from "../types/trace";
 import VirtualScrollArea from "./VirtualScrollArea";
 import ContextMenu, { ContextMenuItem, ContextMenuSeparator } from "./ContextMenu";
@@ -53,6 +54,12 @@ export default function FunctionTree({
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [autoFollow, setAutoFollow] = useState(() => {
+    try { return localStorage.getItem("callTree-autoFollow") === "true"; } catch { return false; }
+  });
+  const globalSelectedSeq = useSelectedSeq();
+  // 用于延迟滚动：rows 变化后再 scrollToRow（同时携带 depth 用于水平定位）
+  const pendingScrollRef = useRef<{ id: number; depth: number } | null>(null);
 
   const rows = useMemo(() => {
     if (nodeMap.size === 0) return [];
@@ -84,6 +91,75 @@ export default function FunctionTree({
   }, [nodeMap, expanded, lazyMode, loadedNodes]);
 
   const vs = useVirtualScroll({ totalCount: rows.length, rowHeight: 22, overscan: 20 });
+
+  // 计算所有行中最大深度，用于确定水平滚动区域宽度
+  const maxDepth = useMemo(() => rows.reduce((m, r) => Math.max(m, r.depth), 0), [rows]);
+  // 内容最小宽度：最深缩进 + 箭头 + 函数名预留 + lineCount
+  const contentMinWidth = maxDepth * 16 + 4 + 16 + 200;
+
+  // 水平滚动：处理触控板 deltaX 和 Shift+滚轮
+  useEffect(() => {
+    const el = vs.containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
+      if (dx !== 0) el.scrollLeft += dx;
+    };
+    el.addEventListener("wheel", handler, { passive: true });
+    return () => el.removeEventListener("wheel", handler);
+  }, [vs.containerRef]);
+
+  // Auto-follow: 当 traceTable 选中行变化时，定位到包含该 seq 的最深节点
+  useEffect(() => {
+    if (!autoFollow || globalSelectedSeq === null || nodeMap.size === 0) return;
+    const seq = globalSelectedSeq;
+    const ancestors: number[] = [];
+    let current = nodeMap.get(0);
+    if (!current || seq < current.entry_seq || seq > current.exit_seq) return;
+    ancestors.push(0);
+    let found = current;
+    let foundDepth = 0;
+    outer: while (true) {
+      for (const childId of current.children_ids) {
+        const child = nodeMap.get(childId);
+        if (child && seq >= child.entry_seq && seq <= child.exit_seq) {
+          ancestors.push(childId);
+          found = child;
+          foundDepth++;
+          current = child;
+          continue outer;
+        }
+      }
+      break;
+    }
+    // 折叠其他节点，仅展开命中路径上的祖先
+    setExpanded(new Set(ancestors));
+    setSelectedId(found.id);
+    pendingScrollRef.current = { id: found.id, depth: foundDepth };
+  }, [autoFollow, globalSelectedSeq, nodeMap]);
+
+  // rows 变化后执行延迟滚动（垂直 + 水平）
+  useEffect(() => {
+    const pending = pendingScrollRef.current;
+    if (!pending) return;
+    pendingScrollRef.current = null;
+    const idx = rows.findIndex(r => r.id === pending.id);
+    if (idx >= 0) {
+      // 垂直居中
+      const center = Math.max(0, idx - Math.floor(vs.visibleRows / 2));
+      vs.scrollToRow(center);
+      // 水平定位：让命中节点的缩进区域可见
+      const el = vs.containerRef.current;
+      if (el) {
+        const targetLeft = pending.depth * 16;
+        const viewWidth = el.clientWidth;
+        // 如果缩进已超出可视范围，滚动到让节点名称左侧留约 20px 余量
+        if (targetLeft < el.scrollLeft || targetLeft > el.scrollLeft + viewWidth - 100) {
+          el.scrollLeft = Math.max(0, targetLeft - 20);
+        }
+      }
+    }
+  }, [rows, vs.visibleRows, vs.scrollToRow, vs.containerRef]);
 
   const toggleExpand = useCallback(async (id: number) => {
     if (expanded.has(id)) {
@@ -162,15 +238,30 @@ export default function FunctionTree({
       <div style={{
         color: "var(--text-secondary)", fontSize: 11,
         padding: "6px 8px 4px", borderBottom: "1px solid var(--border-color)", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
-        Functions ({nodeCount.toLocaleString()})
+        <span>Functions ({nodeCount.toLocaleString()})</span>
+        <label title="Auto-follow: automatically locate the corresponding function when the selected line changes in traceTable" style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", whiteSpace: "nowrap" }}>
+          <input
+            type="checkbox"
+            checked={autoFollow}
+            onChange={(e) => { setAutoFollow(e.target.checked); localStorage.setItem("callTree-autoFollow", String(e.target.checked)); }}
+            style={{ accentColor: "var(--btn-primary)" }}
+          />
+          Auto
+        </label>
       </div>
       <VirtualScrollArea
         containerRef={vs.containerRef}
         containerStyle={vs.containerStyle}
         containerHeight={vs.containerHeight}
         scrollbarProps={vs.scrollbarProps}
+        horizontalScroll
       >
+        {/* 占位元素：撑开水平滚动区域 */}
+        {contentMinWidth > vs.containerWidth && (
+          <div style={{ width: contentMinWidth, height: 0, pointerEvents: "none" }} />
+        )}
         {Array.from({ length: Math.max(0, vs.endIdx - vs.startIdx + 1) }, (_, i) => {
           const index = vs.startIdx + i;
           const row = rows[index];
@@ -185,13 +276,15 @@ export default function FunctionTree({
               onDoubleClick={() => handleDoubleClick(row)}
               onContextMenu={(e) => handleContextMenu(e, row)}
               style={{
-                position: "absolute", top: 0, left: 0, width: "100%", height: 22,
+                position: "absolute", top: 0, left: 0, minWidth: "100%", height: 22,
+                width: contentMinWidth > vs.containerWidth ? contentMinWidth : undefined,
                 transform: `translateY(${vs.getItemY(index)}px)`,
                 paddingLeft: row.depth * 16 + 4, paddingRight: 8,
                 cursor: "pointer", fontSize: 12, lineHeight: "22px",
                 whiteSpace: "nowrap",
                 background: selectedId === row.id ? "var(--bg-selected)" : "transparent",
                 display: "flex", alignItems: "center", gap: 4,
+                boxSizing: "border-box",
               }}
               onMouseEnter={(e) => { if (selectedId !== row.id) e.currentTarget.style.background = "var(--bg-row-odd)"; }}
               onMouseLeave={(e) => { if (selectedId !== row.id) e.currentTarget.style.background = "transparent"; }}

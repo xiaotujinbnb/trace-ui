@@ -20,6 +20,8 @@ interface VirtualScrollAreaProps {
   gutterContent?: ReactNode;
   /** 右侧槽位宽度（默认 12，有 Minimap 时需要更宽） */
   gutterWidth?: number;
+  /** 启用水平滚动 */
+  horizontalScroll?: boolean;
   children: ReactNode;
 }
 
@@ -33,15 +35,24 @@ export default function VirtualScrollArea({
   onKeyDown,
   gutterContent,
   gutterWidth = 12,
+  horizontalScroll,
   children,
 }: VirtualScrollAreaProps) {
+  const outerOverflow: React.CSSProperties = horizontalScroll
+    ? { overflowX: "visible", overflowY: "hidden" }
+    : { overflow: "hidden" };
   return (
-    <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+    <div style={{ flex: 1, display: "flex", ...outerOverflow }}>
       <div
         ref={containerRef}
         tabIndex={tabIndex}
         onKeyDown={onKeyDown}
-        style={{ flex: 1, ...containerStyle, ...style }}
+        style={{
+          flex: 1,
+          ...containerStyle,
+          ...style,
+          ...(horizontalScroll ? { overflowX: "auto", overflowY: "hidden" } : {}),
+        }}
       >
         {children}
       </div>

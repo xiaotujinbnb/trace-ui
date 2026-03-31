@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useVirtualScroll } from "../hooks/useVirtualScroll";
+import { useSelectedSeq } from "../stores/selectedSeqStore";
 import type { FunctionCallEntry, FunctionCallsResult } from "../types/trace";
 import VirtualScrollArea from "./VirtualScrollArea";
 import ContextMenu, { ContextMenuItem } from "./ContextMenu";
@@ -38,6 +39,11 @@ export default function FunctionListPanel({ sessionId, isPhase2Ready, onJumpToSe
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; funcName: string } | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [autoFollow, setAutoFollow] = useState(() => {
+    try { return localStorage.getItem("funcList-autoFollow") === "true"; } catch { return false; }
+  });
+  const globalSelectedSeq = useSelectedSeq();
+  const pendingScrollSeqRef = useRef<number | null>(null);
 
   // Search history
   const [searchHistory, setSearchHistory] = useState<string[]>(() => {
@@ -144,6 +150,34 @@ export default function FunctionListPanel({ sessionId, isPhase2Ready, onJumpToSe
       return next;
     });
   }, []);
+
+  // Auto-follow: 当 traceTable 选中行变化时，定位到匹配的函数调用
+  useEffect(() => {
+    if (!autoFollow || globalSelectedSeq === null || !data) return;
+    const seq = globalSelectedSeq;
+    for (const entry of filtered) {
+      const occ = entry.occurrences.find(o => o.seq === seq);
+      if (occ) {
+        // 折叠其他，仅展开命中的函数组
+        setExpanded(new Set([entry.func_name]));
+        setSelectedSeq(seq);
+        pendingScrollSeqRef.current = seq;
+        return;
+      }
+    }
+  }, [autoFollow, globalSelectedSeq, data, filtered]);
+
+  // rows 变化后执行延迟滚动
+  useEffect(() => {
+    const targetSeq = pendingScrollSeqRef.current;
+    if (targetSeq === null) return;
+    pendingScrollSeqRef.current = null;
+    const idx = rows.findIndex(r => r.type === "occurrence" && r.seq === targetSeq);
+    if (idx >= 0) {
+      const center = Math.max(0, idx - Math.floor(vs.visibleRows / 2));
+      vs.scrollToRow(center);
+    }
+  }, [rows, vs.visibleRows, vs.scrollToRow]);
 
   // Stats
   const filteredCalls = useMemo(() => filtered.reduce((sum, f) => sum + f.occurrences.length, 0), [filtered]);
@@ -273,8 +307,18 @@ export default function FunctionListPanel({ sessionId, isPhase2Ready, onJumpToSe
       <div style={{
         color: "var(--text-secondary)", fontSize: 11,
         padding: "4px 8px 3px", borderBottom: "1px solid var(--border-color)", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
-        {filtered.length} functions, {filteredCalls} calls
+        <span>{filtered.length} functions, {filteredCalls} calls</span>
+        <label title="Auto-follow: automatically locate the corresponding function call when the selected line changes in traceTable" style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", whiteSpace: "nowrap" }}>
+          <input
+            type="checkbox"
+            checked={autoFollow}
+            onChange={(e) => { setAutoFollow(e.target.checked); localStorage.setItem("funcList-autoFollow", String(e.target.checked)); }}
+            style={{ accentColor: "var(--btn-primary)" }}
+          />
+          Auto
+        </label>
       </div>
 
       {/* Virtual list */}
