@@ -569,7 +569,7 @@ impl TraceToolHandler {
             "has_more": (req.offset + result.strings.len() as u32) < result.total,
         });
         if has_results {
-            response["hint"] = serde_json::json!("Use get_string_xrefs with address and byte_len to find which instructions access a string.");
+            response["hint"] = serde_json::json!("Use search_instructions with the string's memory address to find which instructions access it.");
         }
         Ok(json(&response))
     }
@@ -882,8 +882,8 @@ impl ServerHandler for TraceToolHandler {
              2. Overview: analyze_function (no args) to list functions, analyze_crypto to detect algorithms\n\
              3. Locate: search_instructions (supports seq_range/addr_range filtering)\n\
              4. Trace: taint_analysis to track data flow (returns stats + first page of results)\n\
-             5. Deep dive: get_dependency_tree or get_def_use_chain on specific instructions\n\
-             6. Extract: get_memory / get_registers at key points\n\n\
+             5. Deep dive: taint_analysis on specific values to trace their origins\n\
+             6. Extract: get_memory to read key buffers, get_trace_lines(full=true) for register details\n\n\
              Tips:\n\
              - session_id is optional when only one trace is open\n\
              - Use data_only=true in taint_analysis to reduce noise\n\
