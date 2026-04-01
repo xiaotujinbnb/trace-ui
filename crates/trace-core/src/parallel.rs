@@ -104,7 +104,8 @@ pub fn scan_unified_parallel(
         }
     };
 
-    let result = merge::merge_all_chunks(chunk_results, format, data_only, skip_strings, Some(&merge_cb));
+    let result = merge::merge_all_chunks(chunk_results, format, data_only, skip_strings, Some(&merge_cb), None)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     eprintln!("[perf] Phase 2 (merge): {:?}", phase2_start.elapsed());
     eprintln!("[perf] Total scan: {:?}", scan_start.elapsed());
@@ -312,7 +313,8 @@ mod tests {
             })
             .collect();
 
-        let result = crate::merge::merge_all_chunks(chunk_results, format, data_only, skip_strings, None);
+        let result = crate::merge::merge_all_chunks(chunk_results, format, data_only, skip_strings, None, None)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(result)
     }
 

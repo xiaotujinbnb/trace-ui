@@ -73,6 +73,23 @@ impl<'a> MemAccessView<'a> {
         })
     }
 
+    /// Number of unique addresses (for partitioning)
+    pub fn addr_count(&self) -> usize {
+        self.addrs.len()
+    }
+
+    /// Iterate (addr, records_slice) for a range of address indices.
+    /// Used for parallel partitioning.
+    pub fn iter_addr_range(&self, start_idx: usize, end_idx: usize) -> impl Iterator<Item = (u64, &[FlatMemAccessRecord])> {
+        let addrs = &self.addrs[start_idx..end_idx];
+        let offsets = &self.offsets[start_idx..=end_idx]; // inclusive end for CSR
+        addrs.iter().zip(offsets.windows(2)).map(|(&addr, window)| {
+            let start = window[0] as usize;
+            let end = window[1] as usize;
+            (addr, &self.records[start..end])
+        })
+    }
+
     #[allow(dead_code)]
     pub fn total_records(&self) -> usize {
         self.records.len()

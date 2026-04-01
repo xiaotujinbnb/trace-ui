@@ -707,7 +707,8 @@ impl super::TraceEngine {
             handle.scan_strings_cancel.store(false, Ordering::SeqCst);
 
             // 4. Run StringBuilder
-            let mut sb = StringBuilder::new();
+            let estimated_pages = (accesses.len() / 500).max(1024);
+            let mut sb = StringBuilder::with_capacity(estimated_pages);
             for (i, &(addr, data, size, seq, rw)) in accesses.iter().enumerate() {
                 if i % 10000 == 0 && handle.scan_strings_cancel.load(Ordering::SeqCst) {
                     return Err(TraceError::Cancelled);

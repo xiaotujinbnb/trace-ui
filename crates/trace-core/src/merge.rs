@@ -483,7 +483,8 @@ pub fn merge_all_chunks(
     data_only: bool,
     skip_strings: bool,
     progress_fn: Option<&dyn Fn(f64)>,
-) -> ScanResult {
+    cancel_flag: Option<&std::sync::atomic::AtomicBool>,
+) -> std::result::Result<ScanResult, crate::error::TraceError> {
     let num_chunks = chunk_results.len();
     let mut all_patch_edges: Vec<(u32, u32)> = Vec::new();
     let mut all_pair_fixups: Vec<(u32, PairSplitDeps)> = Vec::new();
@@ -797,31 +798,48 @@ pub fn merge_all_chunks(
         let report_interval = (total_accesses / 100).max(1);
         let mut processed = 0usize;
 
-        let mut sb = crate::query::strings::StringBuilder::new();
+        let estimated_pages = {
+            let mut min_addr = u64::MAX;
+            let mut max_addr = 0u64;
+            for chunk in &chunk_string_accesses {
+                for &(addr, _, _, _, _) in chunk {
+                    min_addr = min_addr.min(addr);
+                    max_addr = max_addr.max(addr);
+                }
+            }
+            if max_addr > min_addr {
+                // 上限 1M 页（~4GB 地址范围），避免稀疏地址空间导致 OOM
+                (((max_addr - min_addr) / 4096 + 1) as usize).min(1_000_000)
+            } else {
+                1024
+            }
+        };
+        let mut sb = crate::query::strings::StringBuilder::with_capacity(estimated_pages);
         for chunk_accesses in chunk_string_accesses.into_iter() {
             for &(addr, data, size, seq, rw) in &chunk_accesses {
                 sb.process_access(addr, data, size, seq, rw);
                 processed += 1;
                 if processed % report_interval == 0 {
+                    // Check cancellation
+                    if let Some(flag) = cancel_flag {
+                        if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                            return Err(crate::error::TraceError::Cancelled);
+                        }
+                    }
                     if let Some(ref cb) = progress_fn {
                         cb(0.85 + 0.12 * (processed as f64 / total_accesses as f64));
                     }
                 }
             }
-            // chunk_accesses 在这里 drop，释放内存
         }
 
         if let Some(ref cb) = progress_fn { cb(0.97); }
 
         let t2 = std::time::Instant::now();
-        let mut si = sb.finish();
+        let si = sb.finish();
         eprintln!("[perf] StringBuilder.finish(): {:?} ({} strings)", t2.elapsed(), si.strings.len());
 
-        let t3 = std::time::Instant::now();
-        crate::query::strings::StringBuilder::fill_xref_counts(&mut si, &mem_accesses);
-        eprintln!("[perf] fill_xref_counts: {:?}", t3.elapsed());
-
-        eprintln!("[perf] StringIndex total (build+finish+xref): {:?}", t.elapsed());
+        eprintln!("[perf] StringIndex total (build+finish, xref deferred): {:?}", t.elapsed());
         si
     } else {
         Default::default()
@@ -864,14 +882,14 @@ pub fn merge_all_chunks(
 
     if let Some(ref cb) = progress_fn { cb(1.0); }
 
-    ScanResult {
+    Ok(ScanResult {
         scan_state,
         phase2,
         line_index,
         format,
         call_annotations,
         consumed_seqs: all_consumed_seqs,
-    }
+    })
 }
 
 #[cfg(test)]
