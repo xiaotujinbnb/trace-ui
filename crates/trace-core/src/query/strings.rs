@@ -129,6 +129,12 @@ impl PagedMemory {
             page.clear_owner(offset);
         }
     }
+
+    /// Get page reference for batch byte access (used by scan functions)
+    #[inline]
+    fn get_page(&self, page_addr: u64) -> Option<&Page> {
+        self.pages.get(&page_addr).map(|p| &**p)
+    }
 }
 
 // ── 活跃字符串 ──
@@ -229,10 +235,19 @@ impl StringBuilder {
     fn scan_backward(&self, addr: u64) -> u64 {
         let limit = addr.saturating_sub(MAX_SCAN_LEN);
         let mut cur = addr;
+        let mut pg_addr = cur & PAGE_MASK;
+        let mut pg = self.byte_image.get_page(pg_addr);
+
         while cur > limit {
             let prev = cur - 1;
-            match self.byte_image.get_byte(prev) {
-                Some(b) if is_printable_or_utf8(b) => cur = prev,
+            let prev_pg_addr = prev & PAGE_MASK;
+            if prev_pg_addr != pg_addr {
+                pg_addr = prev_pg_addr;
+                pg = self.byte_image.get_page(pg_addr);
+            }
+            let off = (prev & !PAGE_MASK) as usize;
+            match pg {
+                Some(p) if p.is_valid(off) && is_printable_or_utf8(p.data[off]) => cur = prev,
                 _ => break,
             }
         }
@@ -242,10 +257,19 @@ impl StringBuilder {
     fn scan_forward(&self, addr: u64) -> u64 {
         let limit = addr.saturating_add(MAX_SCAN_LEN);
         let mut cur = addr;
+        let mut pg_addr = cur & PAGE_MASK;
+        let mut pg = self.byte_image.get_page(pg_addr);
+
         while cur < limit {
             let next = cur + 1;
-            match self.byte_image.get_byte(next) {
-                Some(b) if is_printable_or_utf8(b) => cur = next,
+            let next_pg_addr = next & PAGE_MASK;
+            if next_pg_addr != pg_addr {
+                pg_addr = next_pg_addr;
+                pg = self.byte_image.get_page(pg_addr);
+            }
+            let off = (next & !PAGE_MASK) as usize;
+            match pg {
+                Some(p) if p.is_valid(off) && is_printable_or_utf8(p.data[off]) => cur = next,
                 _ => break,
             }
         }
@@ -609,6 +633,20 @@ mod tests {
         // 未设置的偏移仍为 None
         assert_eq!(mem.get_byte(base + 1), None);
         assert_eq!(mem.get_byte(base + 128), None);
+    }
+
+    #[test]
+    fn test_scan_long_string_cross_page() {
+        let mut sb = StringBuilder::new();
+        // Write ASCII chars across a 4KB page boundary (0x0F00 to 0x1100)
+        for i in 0..0x200u64 {
+            let addr = 0x0F00 + i;
+            let val = 0x41 + (i % 26) as u8; // 'A'-'Z' cycling
+            sb.process_access(addr, val as u64, 1, i as u32, StringRw::Write);
+        }
+        let index = sb.finish();
+        let longest = index.strings.iter().max_by_key(|s| s.byte_len).unwrap();
+        assert!(longest.byte_len >= 100, "longest string should be >= 100 bytes, got {}", longest.byte_len);
     }
 
     #[test]
