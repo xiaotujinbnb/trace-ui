@@ -20,7 +20,7 @@
 - **字符串提取** — 自动从内存写操作中提取运行时字符串，支持搜索、XRefs 交叉引用、Hex/Text 详情查看
 - **DEF/USE 箭头连线** — 点击寄存器名可视化数据定义与使用关系，快速追踪值在指令间的传播路径
 - **寄存器 & 内存面板** — 实时查看任意指令处的寄存器值和内存 Hex Dump，支持内存访问历史追溯
-- **AI 辅助分析（MCP）** — 内置 MCP Server，可与 Claude Code、Cursor 等 AI 工具集成，AI 可直接调用 25 个分析工具自动分析 trace
+- **AI 辅助分析（MCP）** — 内置 MCP Server，可与 Claude Code、Cursor 等 AI 工具集成，AI 可直接调用 10 个分析工具自动分析 trace
 - **14 种编辑器主题** — 内置 Monokai、Dracula、Nord、Catppuccin、Gruvbox、Tokyo Night、Solarized、GitHub Light、High Contrast 等主题，一键切换
 - **沉浸式交互体验** — 双击文本全局高亮同名标记、搜索结果关键词高亮、Minimap 缩略导航
 - **多窗口浮动面板** — 搜索、内存、字符串、依赖树、密码学扫描等面板可独立浮出，支持多文件并行分析
@@ -68,19 +68,20 @@ claude mcp add trace-ui --transport http http://127.0.0.1:19821/mcp
 打开 /path/to/trace.log，帮我分析字符串：
 
 1. 提取所有运行时字符串，搜索包含 "http" "token" "key" "sign" 的字符串
-2. 对找到的敏感字符串，查看它们的交叉引用，找出是哪些指令在读写这些字符串
-3. 对最关键的字符串（比如包含 URL 或 token 的），追踪其写入位置的数据来源
+2. 对找到的敏感字符串，用 search_instructions 搜索其地址附近的指令，找出是哪些指令在读写这些字符串
+3. 对最关键的字符串（比如包含 URL 或 token 的），用 taint_analysis 追踪其写入位置的数据来源
 ```
 
 ### MCP 工具一览
 
 | 类别 | 工具 |
 |------|------|
-| 会话管理 | `open_trace`、`close_trace`、`list_sessions`、`get_session_info` |
-| 数据查看 | `get_trace_lines`、`get_registers`、`get_memory`、`get_memory_history` |
-| 搜索分析 | `search_instructions`、`run_taint_analysis`、`get_tainted_lines`、`clear_taint`、`get_dependency_tree` |
-| 结构信息 | `get_call_tree`、`get_function_info`、`get_function_list`、`get_strings`、`get_string_xrefs`、`scan_crypto_patterns` |
-| 扩展工具 | `export_taint_results`、`build_dep_tree_from_slice`、`get_def_use_chain`、`get_line_def_registers`、`get_call_tree_node_count`、`scan_strings` |
+| 会话 | `open_trace` |
+| 浏览 | `get_trace_lines`、`get_memory` |
+| 搜索 | `search_instructions` |
+| 污点分析 | `taint_analysis`、`get_tainted_lines` |
+| 结构 | `get_call_tree`、`analyze_function`、`get_strings` |
+| 密码识别 | `analyze_crypto` |
 
 > 详细的工具说明、实战场景和使用指南请参考 [MCP 使用指南](docs/mcp-guide.md)
 
@@ -282,7 +283,7 @@ claude mcp add trace-ui --transport http http://127.0.0.1:19821/mcp
 │  │trace-parser│  │ trace-mcp  │  │  trace-cli   │       │
 │  │格式解析    │  │ MCP Server │  │ 独立 MCP 入口 │       │
 │  │unidbg     │  │ HTTP/SSE   │  │ Stdio 传输    │       │
-│  │GumTrace   │  │ 25 个工具  │  │              │       │
+│  │GumTrace   │  │ 10 个工具  │  │              │       │
 │  └──────────┘  └────────────┘  └──────────────┘       │
 └───────────────────────────────────────────────────────┘
 ```
@@ -293,7 +294,7 @@ claude mcp add trace-ui --transport http http://127.0.0.1:19821/mcp
 |-------|------|
 | `trace-parser` | Trace 日志格式解析（unidbg / GumTrace），自动格式检测 |
 | `trace-core` | 核心分析引擎，包含索引构建、污点切片、调用树、内存追踪、寄存器检查点、字符串提取、密码算法扫描等全部分析能力 |
-| `trace-mcp` | MCP 协议层，将 trace-core 的能力通过 25 个 MCP 工具暴露，支持 HTTP/SSE 和 Stdio 两种传输 |
+| `trace-mcp` | MCP 协议层，将 trace-core 的能力通过 10 个 MCP 工具暴露，支持 HTTP/SSE 和 Stdio 两种传输 |
 | `trace-cli` | 独立 MCP Server 入口，供 AI 客户端直接调用 |
 
 **后端**：通过 mmap 零拷贝映射 trace 文件，一遍扫描生成依赖图、调用树、内存访问索引和寄存器检查点，全部通过 bincode 持久化缓存。污点切片采用 BFS 反向传播算法，在预构建的依赖图上完成。
